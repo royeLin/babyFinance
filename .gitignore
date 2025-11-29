@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+babyfinace-firebase-adminsdk-fbsvc-f2c14a9495.json
