@@ -37,7 +37,16 @@ model = genai.GenerativeModel('gemini-2.0-flash')
 
 # Initialize Firebase
 if not firebase_admin._apps:
-    cred = credentials.Certificate(firebase_credentials_path)
+    firebase_credentials_json = os.getenv('FIREBASE_CREDENTIALS_JSON')
+    
+    if firebase_credentials_json:
+        # Load from environment variable (Deployment)
+        cred_dict = json.loads(firebase_credentials_json)
+        cred = credentials.Certificate(cred_dict)
+    else:
+        # Load from file (Local Development)
+        cred = credentials.Certificate(firebase_credentials_path)
+        
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
