@@ -45,5 +45,21 @@ Once deployed, Cloud Run will give you a Service URL (e.g., `https://babyfinance
 3.  Update your Webhook URL to: `<YOUR_CLOUD_RUN_URL>/callback`
 4.  Verify and Save.
 
-## Troubleshooting
-If the command fails due to large credentials, you can also deploy first without env vars, then go to the **Cloud Run UI** > **Edit & Deploy New Revision** > **Variables** and paste the values there manually.
+## Step 6: Activate Rich Menu (One-time Setup)
+The "Six-Grid" menu needs to be uploaded to LINE's servers once. You can do this right here in Cloud Shell.
+
+1.  **Install dependencies** (if you haven't yet):
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+2.  **Run the setup script**:
+    You need to provide your Channel Access Token. You can export it temporarily:
+    ```bash
+    export CHANNEL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN_HERE"
+    python setup_rich_menu.py
+    ```
+    *(Replace `YOUR_ACCESS_TOKEN_HERE` with the actual token from LINE Developers Console)*
+
+3.  **Success!**
+    If you see `Successfully set ... as the default rich menu!`, check your LINE app. The menu should be there.

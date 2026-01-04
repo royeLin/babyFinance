@@ -52,16 +52,42 @@ db = firestore.client()
 
 def process_text_input(text, user_id, reply_token):
     try:
+        if text == "How to record?":
+            help_msg = """📝 How to Record:
+Type items like:
+- Coffee $50
+- Taxi 100 Transport
+- Salary 50000 Income
+
+Just type naturally! I'll understand."""
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=help_msg))
+            return
+
+        if text == "Help":
+            help_msg = """🤖 BabyFinance Help:
+• Record: "Lunch $100"
+• Report: "Today", "This Month"
+• Undo: "Delete last"
+• Menu: Tap the buttons below!"""
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=help_msg))
+            return
+
         # NLP Prompt
         prompt = f"""
         You are a professional accounting assistant. Analyze the user's input and determine if they are recording a transaction or asking for a spending report.
+        
+        Special Handling:
+        - "Report Today" -> intent: query, period: today
+        - "Report This Month" -> intent: query, period: this_month
+        - "Report Total" -> intent: query, period: all
+        - "Check last" -> intent: query, period: last_10
 
         If recording a transaction:
         Return JSON: {{"intent": "record", "item": "string", "price": int, "category": "string"}}
         
-        If asking for a report/query (e.g., "how much spent", "report", "check spending"):
+        If asking for a report/query:
         Return JSON: {{"intent": "query", "period": "string"}}
-        (period can be "this_month", "last_month", "today", or "all")
+        (period can be "this_month", "last_month", "today", "all", "last_10")
 
         If neither/unclear:
         Return JSON: {{"intent": "unknown"}}
@@ -109,10 +135,25 @@ def process_text_input(text, user_id, reply_token):
             elif data['period'] == 'today':
                 start_date = datetime.datetime(now.year, now.month, now.day)
                 period_str = "Today"
-            # Add more periods as needed
-            
+            elif data['period'] == 'all':
+                start_date = None
+                period_str = "Total (All Time)"
+                
             if start_date:
                 query_ref = query_ref.where(field_path='date', op_string='>=', value=start_date)
+                
+            if data['period'] == 'last_10':
+                # Fetch last 10 records sorted by date desc
+                docs = query_ref.order_by('date', direction=firestore.Query.DESCENDING).limit(10).stream()
+                
+                report = "📋 Last 10 Records:\n"
+                for doc in docs:
+                    t = doc.to_dict()
+                    date_str = t['date'].strftime('%m/%d') if 'date' in t else ''
+                    report += f"{date_str} {t.get('item')} ${t.get('price')} ({t.get('category')})\n"
+                    
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=report))
+                return
             
             docs = query_ref.stream()
             
