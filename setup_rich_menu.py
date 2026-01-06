@@ -21,35 +21,35 @@ rich_menu_to_create = RichMenu(
     name="BabyFinance 6-Grid",
     chat_bar_text="Open Menu",
     areas=[
-        # Row 1, Col 1: Input Guide
+        # Row 1, Col 1: Monthly Status
         RichMenuArea(
             bounds=RichMenuBounds(x=0, y=0, width=833, height=843),
-            action=MessageAction(label="Input Guide", text="How to record?")
+            action=MessageAction(label="Monthly Status", text="Report Monthly Status")
         ),
-        # Row 1, Col 2: Today
+        # Row 1, Col 2: Set Month Limit
         RichMenuArea(
             bounds=RichMenuBounds(x=833, y=0, width=834, height=843),
-            action=MessageAction(label="Today", text="Report Today")
+            action=MessageAction(label="Set Month Limit", text="How to set monthly limit?")
         ),
-        # Row 1, Col 3: This Month
+        # Row 1, Col 3: Month Success Rate
         RichMenuArea(
             bounds=RichMenuBounds(x=1667, y=0, width=833, height=843),
-            action=MessageAction(label="This Month", text="Report This Month")
+            action=MessageAction(label="Month Success Rate", text="Report Monthly Rate")
         ),
-        # Row 2, Col 1: Total
+        # Row 2, Col 1: Project Status
         RichMenuArea(
             bounds=RichMenuBounds(x=0, y=843, width=833, height=843),
-            action=MessageAction(label="Total", text="Report Total")
+            action=MessageAction(label="Project Status", text="Report Project Status")
         ),
-        # Row 2, Col 2: Last Record
+        # Row 2, Col 2: Set Project Limit
         RichMenuArea(
             bounds=RichMenuBounds(x=833, y=843, width=834, height=843),
-            action=MessageAction(label="Last Record", text="Check last")
+            action=MessageAction(label="Set Project Limit", text="How to set project limit?")
         ),
-        # Row 2, Col 1: Help
+        # Row 2, Col 3: Project Success Rate
         RichMenuArea(
             bounds=RichMenuBounds(x=1667, y=843, width=833, height=843),
-            action=MessageAction(label="Help", text="Help")
+            action=MessageAction(label="Project Success Rate", text="Report Project Rate")
         )
     ]
 )

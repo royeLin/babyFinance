@@ -50,47 +50,131 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
+def get_monthly_status(user_id, target_month_str=None):
+    """
+    Returns (spent, limit, percentage) for the month.
+    target_month_str: 'YYYY-MM'
+    """
+    now = datetime.datetime.now()
+    if not target_month_str:
+        target_month_str = now.strftime("%Y-%m")
+    
+    # Get Limit
+    limit_ref = db.collection('users').document(user_id).collection('settings').document('monthly_limits')
+    limit_doc = limit_ref.get()
+    limit_data = limit_doc.to_dict() if limit_doc.exists else {}
+    limit = limit_data.get(target_month_str, 0)
+    
+    # Get Spend
+    start_date = datetime.datetime.strptime(target_month_str, "%Y-%m")
+    # End date is start of next month
+    if start_date.month == 12:
+        end_date = datetime.datetime(start_date.year + 1, 1, 1)
+    else:
+        end_date = datetime.datetime(start_date.year, start_date.month + 1, 1)
+        
+    transactions = db.collection('users').document(user_id).collection('transactions')\
+        .where(filter=firestore.FieldFilter('date', '>=', start_date))\
+        .where(filter=firestore.FieldFilter('date', '<', end_date))\
+        .stream()
+        
+    spent = sum(t.to_dict().get('price', 0) for t in transactions)
+    
+    return spent, limit
+
+def get_project_status(user_id, project_name):
+    """
+    Returns (spent, limit, percentage) for the project.
+    """
+    # Get Limit
+    limit_ref = db.collection('users').document(user_id).collection('settings').document('project_limits')
+    limit_doc = limit_ref.get()
+    limit_data = limit_doc.to_dict() if limit_doc.exists else {}
+    limit = limit_data.get(project_name, 0)
+    
+    # Get Spend
+    transactions = db.collection('users').document(user_id).collection('transactions')\
+        .where(filter=firestore.FieldFilter('project', '==', project_name))\
+        .stream()
+        
+    spent = sum(t.to_dict().get('price', 0) for t in transactions)
+    
+    return spent, limit
+
 def process_text_input(text, user_id, reply_token):
     try:
-        if text == "How to record?":
+        # Help / Static Responses
+        if text.lower() in ["help", "input guide", "how to record?"]:
             help_msg = """📝 How to Record:
-Type items like:
-- Coffee $50
-- Taxi 100 Transport
-- Salary 50000 Income
+• Standard: "Lunch $100"
+• Project: "TripTokyo Flight $500"
 
-Just type naturally! I'll understand."""
+⚙️ Settings:
+• "Set monthly limit 2025-01 50000"
+• "Set project limit TripTokyo 20000"
+
+📊 Reports:
+• Use the Rich Menu for instant reports!"""
             line_bot_api.reply_message(reply_token, TextSendMessage(text=help_msg))
             return
 
-        if text == "Help":
-            help_msg = """🤖 BabyFinance Help:
-• Record: "Lunch $100"
-• Report: "Today", "This Month"
-• Undo: "Delete last"
-• Menu: Tap the buttons below!"""
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=help_msg))
-            return
+        if text == "How to set monthly limit?":
+             line_bot_api.reply_message(reply_token, TextSendMessage(text="To set a monthly limit, type:\nSet monthly limit YYYY-MM AMOUNT\n\nExample:\nSet monthly limit 2025-01 50000"))
+             return
+
+        if text == "How to set project limit?":
+             line_bot_api.reply_message(reply_token, TextSendMessage(text="To set a project limit, type:\nSet project limit PROJECT_NAME AMOUNT\n\nExample:\nSet project limit Renovation 100000"))
+             return
 
         # NLP Prompt
         prompt = f"""
-        You are a professional accounting assistant. Analyze the user's input and determine if they are recording a transaction or asking for a spending report.
+        You are a smart accounting assistant. Analyze the user input.
         
-        Special Handling:
-        - "Report Today" -> intent: query, period: today
-        - "Report This Month" -> intent: query, period: this_month
-        - "Report Total" -> intent: query, period: all
-        - "Check last" -> intent: query, period: last_10
-
-        If recording a transaction:
-        Return JSON: {{"intent": "record", "item": "string", "price": int, "category": "string"}}
+        Current Date: {datetime.datetime.now().strftime("%Y-%m-%d")}
         
-        If asking for a report/query:
-        Return JSON: {{"intent": "query", "period": "string"}}
-        (period can be "this_month", "last_month", "today", "all", "last_10")
+        Intents:
+        1. record: User is spending money. Extract item, price, category, and optionally 'project'.
+        2. query: User wants a report.
+        3. set_limit_month: User wants to set a budget for a specific month.
+        4. set_limit_project: User wants to set a budget for a specific project.
+        
+        Output JSON format:
+        
+        For 'record':
+        {{
+            "intent": "record",
+            "item": "string",
+            "price": int,
+            "category": "string",
+            "project": "string|null"  (extract if user mentions a specific event/project context like 'Trip', 'Renovation')
+        }}
+        
+        For 'set_limit_month':
+        {{
+            "intent": "set_limit_month",
+            "month": "YYYY-MM", (default to current month if not specified)
+            "amount": int
+        }}
+        
+        For 'set_limit_project':
+        {{
+            "intent": "set_limit_project",
+            "project": "string",
+            "amount": int
+        }}
 
-        If neither/unclear:
-        Return JSON: {{"intent": "unknown"}}
+        For 'query':
+        {{
+            "intent": "query",
+            "type": "monthly_status" | "monthly_rate" | "project_status" | "project_rate",
+            "target": "string|null" (e.g., project name if applicable)
+        }}
+        
+        Special Keywords Mapping:
+        - "Report Monthly Status" -> query, type=monthly_status
+        - "Report Monthly Rate" -> query, type=monthly_rate
+        - "Report Project Status" -> query, type=project_status
+        - "Report Project Rate" -> query, type=project_rate
         
         User Input: {text}
         """
@@ -103,87 +187,90 @@ Just type naturally! I'll understand."""
         except json.JSONDecodeError:
             data = {"intent": "unknown"}
         
+        # --- Handle Intents ---
+        
         if data.get('intent') == 'record':
             # Add timestamp and save to Firestore
-            data['date'] = datetime.datetime.now()
-            
-            # Path: users/{user_id}/transactions/{auto_id}
-            db.collection('users').document(user_id).collection('transactions').add({
+            doc_data = {
                 'item': data['item'],
                 'price': data['price'],
                 'category': data['category'],
-                'date': data['date']
-            })
+                'date': datetime.datetime.now(),
+                'project': data.get('project') # Can be None
+            }
+            db.collection('users').document(user_id).collection('transactions').add(doc_data)
             
             reply_msg = f"✅ Recorded: {data['item']} - ${data['price']} ({data['category']})"
-            line_bot_api.reply_message(
-                reply_token,
-                TextSendMessage(text=reply_msg)
+            if data.get('project'):
+                reply_msg += f"\n📂 Project: {data['project']}"
+                
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=reply_msg))
+            
+        elif data.get('intent') == 'set_limit_month':
+            month = data.get('month')
+            amount = data.get('amount')
+            
+            db.collection('users').document(user_id).collection('settings').document('monthly_limits').set(
+                {month: amount}, merge=True
             )
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ Limit set for {month}: ${amount}"))
+            
+        elif data.get('intent') == 'set_limit_project':
+            project = data.get('project')
+            amount = data.get('amount')
+            
+            db.collection('users').document(user_id).collection('settings').document('project_limits').set(
+                {project: amount}, merge=True
+            )
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ Limit set for project '{project}': ${amount}"))
             
         elif data.get('intent') == 'query':
-            # Handle Query
-            now = datetime.datetime.now()
-            query_ref = db.collection('users').document(user_id).collection('transactions')
+            q_type = data.get('type')
             
-            start_date = None
-            period_str = "Total"
-            
-            if data['period'] == 'this_month':
-                start_date = datetime.datetime(now.year, now.month, 1)
-                period_str = "This Month"
-            elif data['period'] == 'today':
-                start_date = datetime.datetime(now.year, now.month, now.day)
-                period_str = "Today"
-            elif data['period'] == 'all':
-                start_date = None
-                period_str = "Total (All Time)"
+            if q_type in ['monthly_status', 'monthly_rate']:
+                current_month = datetime.datetime.now().strftime("%Y-%m")
+                spent, limit = get_monthly_status(user_id, current_month)
                 
-            if start_date:
-                query_ref = query_ref.where(field_path='date', op_string='>=', value=start_date)
+                if limit > 0:
+                    rate = (spent / limit) * 100
+                    status_emoji = "🟢" if rate < 80 else "🟡" if rate < 100 else "🔴"
+                    msg = f"📅 Month ({current_month})\n"
+                    msg += f"💸 Spent: ${spent}\n"
+                    msg += f"🛑 Limit: ${limit}\n"
+                    msg += f"📊 Rate: {rate:.1f}% {status_emoji}"
+                    if spent > limit:
+                        msg += f"\n⚠️ Over budget by ${spent - limit}!"
+                else:
+                     msg = f"📅 Month ({current_month})\n💸 Spent: ${spent}\n(No limit set)"
                 
-            if data['period'] == 'last_10':
-                # Fetch last 10 records sorted by date desc
-                docs = query_ref.order_by('date', direction=firestore.Query.DESCENDING).limit(10).stream()
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+
+            elif q_type in ['project_status', 'project_rate']:
+                # For project summary, we might need a specific project name or list all?
+                # For simplicity, if no specific project mentioned, list top active ones or ask for name.
+                # Here we'll list all projects that have limits set or transactions.
+                # Actually, listing all might be too long. Let's fetch projects with limits for now.
                 
-                report = "📋 Last 10 Records:\n"
-                for doc in docs:
-                    t = doc.to_dict()
-                    date_str = t['date'].strftime('%m/%d') if 'date' in t else ''
-                    report += f"{date_str} {t.get('item')} ${t.get('price')} ({t.get('category')})\n"
-                    
+                settings_ref = db.collection('users').document(user_id).collection('settings').document('project_limits').get()
+                projects_limits = settings_ref.to_dict() if settings_ref.exists else {}
+                
+                if not projects_limits:
+                     line_bot_api.reply_message(reply_token, TextSendMessage(text="No project limits found. Set one via 'Set project limit NAME AMOUNT'"))
+                     return
+
+                report = "📂 Projects Status:\n"
+                for proj_name, limit in projects_limits.items():
+                    spent, _ = get_project_status(user_id, proj_name)
+                    rate = (spent / limit) * 100 if limit > 0 else 0
+                    emoji = "🟢" if rate < 100 else "🔴"
+                    report += f"\n▪️ {proj_name}\n   ${spent} / ${limit} ({rate:.1f}%) {emoji}"
+                
                 line_bot_api.reply_message(reply_token, TextSendMessage(text=report))
-                return
-            
-            docs = query_ref.stream()
-            
-            total_amount = 0
-            category_totals = {}
-            
-            for doc in docs:
-                t = doc.to_dict()
-                price = t.get('price', 0)
-                category = t.get('category', 'Uncategorized')
-                
-                total_amount += price
-                category_totals[category] = category_totals.get(category, 0) + price
-            
-            # Format Report
-            report = f"📊 Spending Report ({period_str})\n"
-            report += f"💰 Total: ${total_amount}\n"
-            report += "----------------\n"
-            for cat, amount in category_totals.items():
-                report += f"• {cat}: ${amount}\n"
-                
-            line_bot_api.reply_message(
-                reply_token,
-                TextSendMessage(text=report)
-            )
 
         else:
             line_bot_api.reply_message(
                 reply_token,
-                TextSendMessage(text="I didn't understand that. You can say 'Coffee $50' to record, or 'Check spending' to see report.")
+                TextSendMessage(text="I didn't understand that. You can say 'Help' for instructions.")
             )
 
     except Exception as e:
